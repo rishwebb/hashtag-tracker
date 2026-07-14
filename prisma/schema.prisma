@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Media {
+  id            String   @id
+  caption       String?
+  mediaType     String
+  mediaUrl      String
+  permalink     String
+  timestamp     DateTime
+  likeCount     Int?
+  commentsCount Int?
+  localPath     String?
+  createdAt     DateTime @default(now())
+}
