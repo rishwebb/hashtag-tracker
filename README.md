@@ -1,6 +1,6 @@
 # Hashtag Tracker
 
-Hashtag Tracker syncs Instagram hashtag media through the Meta Graph API, stores media metadata in PostgreSQL with Prisma, downloads assets locally, and exposes a paginated `GET /hashtags` endpoint for consumers.
+Hashtag Tracker is a backend service that periodically synchronizes Instagram hashtag media from the Meta Graph API, stores media metadata in PostgreSQL, downloads media locally, and exposes the stored data through a paginated REST API. The project demonstrates backend architecture, scheduled jobs, queue abstraction, database design, and service separation.
 
 ## Overview
 
@@ -9,7 +9,7 @@ The service has two main responsibilities:
 - sync Instagram media for the matcha hashtag using the Meta Graph API
 - expose stored media through a simple paginated API
 
-The write path is intentionally separated into small services so queueing, storage, and sync strategies can evolve independently.
+This project intentionally favors readability and clear separation of responsibilities over premature optimization.
 
 ## Features
 
@@ -24,26 +24,23 @@ The write path is intentionally separated into small services so queueing, stora
 ## Architecture
 
 ```text
-Client
-   |
-GET /hashtags
-   |
-Express
-   |
-Prisma
-   |
-PostgreSQL
+                     Meta Graph API
+                           |
+                    InstagramService
+                           |
+                      SyncService
+                    /             \
+                   /               \
+          StorageService         Prisma
+               |                    |
+         Local uploads         PostgreSQL
 
-Cron
-   |
-Queue
-   |
-SyncService
-   |
-InstagramService
-   |
-StorageService
+Cron -> Queue -> SyncService
+
+Client -> GET /hashtags -> Express -> Prisma -> PostgreSQL
 ```
+
+The queue is currently an in-memory FIFO queue that serializes sync jobs. It exists behind an abstraction so it can later be replaced with Amazon SQS or another distributed queue.
 
 ## Tech Stack
 
@@ -121,6 +118,21 @@ Apply schema changes locally:
 npm run prisma:migrate
 ```
 
+## Database Schema
+
+The main table is `Media`, which stores:
+
+- `id` (primary key)
+- `caption`
+- `mediaType`
+- `mediaUrl`
+- `permalink`
+- `timestamp`
+- `likeCount`
+- `commentsCount`
+- `localPath`
+- `createdAt`
+
 ## Folder Structure
 
 ```text
@@ -156,7 +168,9 @@ Query parameters:
 - `page`: defaults to `1`
 - `limit`: defaults to `20`, maximum `100`
 
-Response shape:
+Pagination uses SQL `OFFSET` / `LIMIT` through Prisma. Offset pagination is sufficient here because the assignment scope is small and ingestion is capped at 500 records per sync.
+
+Success response shape:
 
 ```json
 {
@@ -180,6 +194,37 @@ Response shape:
 }
 ```
 
+Example `400 Bad Request` response:
+
+```json
+{
+  "error": "Query parameter page must be a positive integer."
+}
+```
+
+Example `500 Internal Server Error` response:
+
+```json
+{
+  "error": "Internal server error"
+}
+```
+
+## Error Handling
+
+- Database writes use Prisma `upsert` operations to prevent duplicate records.
+- Failed downloads or per-item processing errors are logged without stopping the entire sync.
+- If a download succeeds but the database write fails, the downloaded file is cleaned up to avoid orphaned local files.
+- API failures from the Meta Graph API are surfaced with normalized error messages and can be retried on the next scheduled sync.
+- The `/hashtags` route validates input and returns `400` for invalid pagination parameters and `500` for unexpected failures.
+
+## Assumptions
+
+- Meta API synchronization processes a maximum of 500 media items per run.
+- Only hashtag media accessible through the configured Meta Graph API credentials is synchronized.
+- One scheduled sync job runs at a time through the current in-memory queue flow.
+- Local filesystem storage is acceptable for the assignment environment.
+
 ## Design Decisions
 
 - Prisma is used for database access and migrations to keep schema management explicit.
@@ -192,4 +237,32 @@ Response shape:
 
 - Local filesystem storage instead of S3
 - In-memory queue instead of SQS
-- Sequential media processing for simpler failure isolation and logging
+- Sequential media processing simplifies failure isolation and deterministic logging at the expense of throughput. For larger workloads, batched concurrent workers would be a better fit.
+
+## Security
+
+- Credentials are loaded from environment variables.
+- Prisma uses parameterized queries under the hood for database access.
+- Request parameters are validated before database access.
+- `.env` is excluded from version control through `.gitignore`.
+
+## Deployment
+
+For production, I would deploy this with:
+
+- Docker
+- Amazon ECS
+- Amazon RDS
+- Amazon S3
+- Amazon SQS
+- EventBridge Scheduler
+
+## Future Improvements
+
+- Replace local storage with Amazon S3
+- Replace the in-memory queue with Amazon SQS
+- Add concurrent worker processing
+- Add retry logic and dead-letter queues
+- Add Prometheus metrics
+- Add distributed tracing
+- Containerize and automate deployment workflows
