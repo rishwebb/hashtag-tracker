@@ -6,10 +6,20 @@ Hashtag Tracker syncs Instagram hashtag media through the Meta Graph API, stores
 
 The service has two main responsibilities:
 
-- sync hashtag media from Instagram on a schedule
+- sync Instagram media for the matcha hashtag using the Meta Graph API
 - expose stored media through a simple paginated API
 
 The write path is intentionally separated into small services so queueing, storage, and sync strategies can evolve independently.
+
+## Features
+
+- Fetches Instagram hashtag media using the Meta Graph API
+- Supports paginated ingestion up to 500 media items
+- Prevents duplicate records with Prisma upsert
+- Downloads media assets to local storage
+- Runs automatic recent-media sync every 3 hours
+- Exposes a paginated REST API
+- Abstracts queue and storage implementations for future AWS migration
 
 ## Architecture
 
@@ -163,7 +173,7 @@ Response shape:
       "timestamp": "2026-07-14T12:00:00.000Z",
       "likeCount": 12,
       "commentsCount": 3,
-      "localPath": "C:\\\\path\\\\to\\\\uploads\\\\17800000000000000.jpg",
+      "localPath": "uploads/17800000000000000.jpg",
       "createdAt": "2026-07-14T12:05:00.000Z"
     }
   ]
